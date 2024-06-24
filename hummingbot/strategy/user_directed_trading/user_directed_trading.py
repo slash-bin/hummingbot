@@ -28,6 +28,13 @@ udt_logger: Optional[logging.Logger] = None
 
 
 async def _custom_stop_loop(self: "HummingbotApplication", skip_order_cancellation: bool = False):
+    """
+    Overrides the default stop_loop() method in HummingbotApplication to allow for cancelling orders in user directed
+    trade strategy before stopping.
+
+    The user directed trading strategy uses a different method for managing exchange connectors, and thus requires a
+    different stop_loop() method to handle the cancellation of orders.
+    """
     from hummingbot.core.rate_oracle.rate_oracle import RateOracle
     self.logger().info("stop command initiated.")
     self.notify("\nWinding down...")
@@ -67,6 +74,15 @@ async def _custom_stop_loop(self: "HummingbotApplication", skip_order_cancellati
 
 
 class UserDirectedTradingStrategy(StrategyPyBase):
+    """
+    User directed trading strategy.
+
+    This strategy allows users to direct trading actions via MQTT and thus Hummingbot AI chat interface.
+
+    Since the user may specify any arbitrary exchange connector and trading pair to trade on, this stratey uses custom
+    methods to manage exchange connectors and trading pairs. The exchange connectors are created on-the-fly and are
+    not managed by the Hummingbot application.
+    """
     _exchange_connectors_cache: Dict[Tuple[str, str], ExchangeBase]
     _is_stopping: bool
 
