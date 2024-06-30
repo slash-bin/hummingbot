@@ -4,6 +4,8 @@ import platform
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
 
+import pandas as pd
+
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.core.clock import Clock
@@ -11,6 +13,7 @@ from hummingbot.core.data_type.common import OrderType
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.market_order import MarketOrder
 from hummingbot.remote_iface.messages import (
+    MQTT_STATUS_CODE,
     ExchangeInfo,
     ExchangeInfoCommandMessage,
     OpenOrderInfo,
@@ -84,6 +87,8 @@ class UserDirectedTradingStrategy(StrategyPyBase):
     not managed by the Hummingbot application.
     """
     _exchange_connectors_cache: Dict[Tuple[str, str], ExchangeBase]
+    _exchange_connectors_ttl: Dict[Tuple[str, str], float]
+    _inactive_exchange_ttl: float = 30.0
     _is_stopping: bool
 
     @classmethod
@@ -95,6 +100,7 @@ class UserDirectedTradingStrategy(StrategyPyBase):
 
     def init_params(self):
         self._exchange_connectors_cache = {}
+        self._exchange_connectors_ttl = {}
         self._is_stopping = False
 
     async def get_connected_exchanges(self) -> Dict[str, ExchangeBase]:
@@ -181,6 +187,7 @@ class UserDirectedTradingStrategy(StrategyPyBase):
                 connector_class: Type[ExchangeBase] = get_connector_class(exchange_name)
                 connector: ExchangeBase = connector_class(**init_params)
             self._exchange_connectors_cache[exchange_key] = connector
+            self.add_markets([connector])
 
         return self._exchange_connectors_cache[exchange_key]
 
@@ -227,9 +234,81 @@ class UserDirectedTradingStrategy(StrategyPyBase):
                 exchange_connector.start(self.clock, timestamp)
             exchange_connector.tick(timestamp)
 
-    def format_status(self) -> str:
-        # Implement your format_status logic here
-        pass
+        # GC inactive exchange connectors
+        self.clean_up_inactive_exchange_connectors()
+
+    async def format_status(self) -> str:
+        exchange_info: ExchangeInfoCommandMessage.Response = await self.mqtt_exchange_info(None)
+        exchange_outputs: List[str] = ["Connected exchanges and balances:"]
+
+        if len(exchange_info.exchanges) == 0:
+            return "No exchange connected. Use the connect command to connect to an exchange."
+
+        for exchange_item in exchange_info.exchanges:
+            lines: List[str] = [f" {exchange_item.name}:"]
+            balances_df: pd.DataFrame = pd.DataFrame(
+                data=exchange_item.balances.items(),
+                columns=["asset", "balance"]
+            ).set_index("asset")
+            balances_df = balances_df.sort_index()
+            balances_df = balances_df[balances_df.balance != 0.0]
+            lines.extend([
+                "  " + line
+                for line in balances_df.to_string().split("\n")
+            ])
+            exchange_outputs.append("\n".join(lines))
+
+        exchange_outputs.append("Strategy ready. Use MQTT commands to direct trading.")
+
+        return "\n\n".join(exchange_outputs)
+
+    def clean_up_inactive_exchange_connectors(self):
+        """
+        GC logic for exchange connectors.
+
+        If an exchange connector is newly inactive, record its key in `self._exchange_connectors_ttl` with the
+        current timestamp + `self._inactive_exchange_ttl` as the value.
+
+        If an exchange connector associated with `self._exchange_connectors_ttl` has any active orders, then remove
+        the key from `self._exchange_connectors_ttl` - since it is now active.
+
+        If an exchange connector associated with `self._exchange_connectors_ttl` has expired, as defined by
+        the current timestamp being greater than the value associated with the key, then remove the key from
+        both `self._exchange_connectors_ttl` and `self._exchange_connectors_cache`.
+        """
+        current_timestamp: float = self.current_timestamp
+        inactive_connectors_keys: Tuple[str, str] = []
+
+        # Find all inactive exchange connectors, and record their keys in `inactive_connectors_keys`;
+        # Also, if an exchange connector is active, remove it from `self._exchange_connectors_ttl`.
+        tracked_orders: List[Tuple[ConnectorBase, LimitOrder]] = (
+            self.order_tracker.tracked_limit_orders +
+            self.order_tracker.tracked_market_orders
+        )
+        for key, exchange_connector in self._exchange_connectors_cache.items():
+            if len([o for o in tracked_orders if o[0] == exchange_connector]) == 0:
+                if key not in self._exchange_connectors_ttl:
+                    self._exchange_connectors_ttl[key] = current_timestamp + self._inactive_exchange_ttl
+                inactive_connectors_keys.append(key)
+            elif key in self._exchange_connectors_ttl:
+                del self._exchange_connectors_ttl[key]
+
+        # Remove all inactive exchange connectors from `self._exchange_connectors_cache` and
+        # `self._exchange_connectors_ttl`. Stop the exchange connector before removing it.
+        ttl_keys_to_delete: List[Tuple[str, str]] = []
+        for key in self._exchange_connectors_ttl.keys():
+            if key not in self._exchange_connectors_cache:
+                ttl_keys_to_delete.append(key)
+            elif current_timestamp > self._exchange_connectors_ttl[key]:
+                exchange_connector: ExchangeBase = self._exchange_connectors_cache[key]
+                exchange_connector.stop(self.clock)
+                self.remove_markets([exchange_connector])
+                del self._exchange_connectors_cache[key]
+                ttl_keys_to_delete.append(key)
+
+        # Remove the ttl keys separately because we cannot modify the dictionary while iterating over it.
+        for key in ttl_keys_to_delete:
+            del self._exchange_connectors_ttl[key]
 
     async def mqtt_exchange_info(self, exchange: Optional[str]) -> ExchangeInfoCommandMessage.Response:
         exchanges: Dict[str, ExchangeBase] = await self.get_connected_exchanges()
@@ -266,10 +345,12 @@ class UserDirectedTradingStrategy(StrategyPyBase):
                 exchange=connector.name,
                 trading_pair=limit_order.trading_pair,
                 order_id=limit_order.client_order_id,
-                order_type="LIMIT",
-                price=limit_order.price,
-                amount=limit_order.quantity,
-                status=limit_order.status
+                is_buy=limit_order.is_buy,
+                is_limit_order=True,
+                limit_price=str(limit_order.price),
+                amount_total=str(limit_order.quantity),
+                amount_remaining=str(limit_order.quantity - limit_order.filled_quantity),
+                order_state="OPEN",
             ))
 
         for connector, market_order in tracked_market_orders:
@@ -281,13 +362,15 @@ class UserDirectedTradingStrategy(StrategyPyBase):
                 exchange=connector.name,
                 trading_pair=market_order.trading_pair,
                 order_id=market_order.client_order_id,
-                order_type="MARKET",
-                price=None,
-                amount=market_order.quantity,
-                status=market_order.status
+                is_buy=market_order.is_buy,
+                is_limit_order=False,
+                limit_price=None,
+                amount_total=str(market_order.quantity),
+                amount_remaining="0",
+                order_state="NEW"
             ))
 
-        return UserDirectedTradeCommandMessage.Response(active_orders=open_orders)
+        return UserDirectedListActiveOrdersCommandMessage.Response(active_orders=open_orders)
 
     async def mqtt_user_directed_trade(
             self,
@@ -295,27 +378,30 @@ class UserDirectedTradingStrategy(StrategyPyBase):
             trading_pair: str,
             is_buy: bool,
             is_limit_order: bool,
-            limit_price: Optional[float],
-            amount: float,
+            limit_price: Optional[Decimal],
+            amount: Decimal,
     ) -> UserDirectedTradeCommandMessage.Response:
         if is_limit_order and limit_price is None:
             raise ValueError("Limit price must not be None for a limit order")
 
         trading_pair_tuple: MarketTradingPairTuple = await self.create_market_trading_pair_tuple(exchange, trading_pair)
+        while not trading_pair_tuple.market.ready:
+            await asyncio.sleep(0.1)
+
         if is_limit_order:
             if is_buy:
                 order_id = self.buy_with_specific_market(
                     market_trading_pair_tuple=trading_pair_tuple,
                     amount=amount,
                     order_type=OrderType.LIMIT,
-                    price=Decimal(f"{limit_price:g}")
+                    price=limit_price
                 )
             else:
                 order_id = self.sell_with_specific_market(
                     market_trading_pair_tuple=trading_pair_tuple,
                     amount=amount,
                     order_type=OrderType.LIMIT,
-                    price=Decimal(f"{limit_price:g}")
+                    price=limit_price
                 )
         else:
             if is_buy:
@@ -333,10 +419,22 @@ class UserDirectedTradingStrategy(StrategyPyBase):
 
     async def mqtt_user_directed_cancel(
             self,
-            exchange: str,
-            trading_pair: str,
             order_id: str
     ) -> UserDirectedCancelCommandMessage.Response:
-        trading_pair_tuple: MarketTradingPairTuple = await self.create_market_trading_pair_tuple(exchange, trading_pair)
-        self.cancel_order(trading_pair_tuple, order_id)
-        return UserDirectedCancelCommandMessage.Response(order_id=order_id)
+        all_active_orders: List[Tuple[ConnectorBase, LimitOrder]] = (
+            self.order_tracker.tracked_limit_orders + self.order_tracker.tracked_market_orders
+        )
+        for connector, order in all_active_orders:
+            if order.client_order_id == order_id:
+                trading_pair_tuple: MarketTradingPairTuple = await self.create_market_trading_pair_tuple(
+                    connector.name,
+                    order.trading_pair
+                )
+                self.cancel_order(trading_pair_tuple, order_id)
+                return UserDirectedCancelCommandMessage.Response(
+                    status=MQTT_STATUS_CODE.SUCCESS,
+                    exchange=connector.name,
+                    trading_pair=order.trading_pair,
+                    order_id=order_id
+                )
+        return UserDirectedCancelCommandMessage.Response(status=MQTT_STATUS_CODE.ERROR, msg="Order not found")

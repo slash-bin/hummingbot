@@ -154,6 +154,7 @@ class ExchangeInfoCommandMessage(RPCMessage):
     class Response(RPCMessage.Response):
         status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
         exchanges: List[ExchangeInfo] = []
+        msg: str = ''
 
 
 class UserDirectedTradeCommandMessage(RPCMessage):
@@ -167,20 +168,20 @@ class UserDirectedTradeCommandMessage(RPCMessage):
 
     class Response(RPCMessage.Response):
         status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
-        order_id: str
+        order_id: str = ''
         msg: str = ''
 
 
 class UserDirectedCancelCommandMessage(RPCMessage):
     class Request(RPCMessage.Request):
-        exchange: str
-        trading_pair: str
         order_id: str
 
     class Response(RPCMessage.Response):
         status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
-        order_id: str
-        msg: Optional[str] = ''
+        exchange: str = ''
+        trading_pair: str = ''
+        order_id: str = ''
+        msg: str = ''
 
 
 class OpenOrderInfo(BaseModel):
@@ -204,6 +205,7 @@ class UserDirectedListActiveOrdersCommandMessage(RPCMessage):
     class Response(RPCMessage.Response):
         status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
         active_orders: List[OpenOrderInfo]
+        msg: str = ''
 
 
 class UserDirectedOrderUpdateMessage(PubSubMessage):
@@ -216,4 +218,4 @@ class UserDirectedOrderUpdateMessage(PubSubMessage):
     amount_total: str
     amount_remaining: str
     order_state: str
-    msg: Optional[str]
+    msg: str = ''

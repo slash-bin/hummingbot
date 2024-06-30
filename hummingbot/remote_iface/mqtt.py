@@ -372,21 +372,84 @@ class MQTTCommands:
             response.msg = str(e)
         return response
 
-    def _on_cmd_exchange_info(self, msg: ExchangeInfoCommandMessage.Request):
-        # TODO: forward this to the user directed trade strategy
-        pass
+    def _on_cmd_exchange_info(
+            self,
+            msg: ExchangeInfoCommandMessage.Request
+    ) -> ExchangeInfoCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
 
-    def _on_cmd_user_directed_trade(self, msg: UserDirectedTradeCommandMessage):
-        # TODO: forward this to the user directed trade strategy
-        pass
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return ExchangeInfoCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
 
-    def _on_cmd_user_directed_cancel(self, msg: UserDirectedCancelCommandMessage):
-        # TODO: forward this to the user directed trade strategy
-        pass
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(strategy.mqtt_exchange_info(), loop=self._ev_loop)
 
-    def _on_cmd_user_directed_list_active_orders(self, msg: UserDirectedListActiveOrdersCommandMessage):
-        # TODO: forward this to the user directed trade strategy
-        pass
+    def _on_cmd_user_directed_trade(
+            self,
+            msg: UserDirectedTradeCommandMessage.Request
+    ) -> UserDirectedTradeCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedTradeCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_user_directed_trade(
+                exchange=msg.exchange,
+                trading_pair=msg.trading_pair,
+                is_buy=msg.is_buy,
+                is_limit_order=msg.is_limit_order,
+                limit_price=Decimal(msg.limit_price) if msg.limit_price is not None else None,
+                amount=Decimal(msg.amount)
+            ),
+            loop=self._ev_loop
+        )
+
+    def _on_cmd_user_directed_cancel(
+            self,
+            msg: UserDirectedCancelCommandMessage.Request
+    ) -> UserDirectedCancelCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedCancelCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_user_directed_cancel(order_id=msg.order_id),
+            loop=self._ev_loop
+        )
+
+    def _on_cmd_user_directed_list_active_orders(
+            self,
+            msg: UserDirectedListActiveOrdersCommandMessage.Request
+    ) -> UserDirectedListActiveOrdersCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedListActiveOrdersCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_user_directed_list_active_orders(
+                exchange=msg.exchange,
+                trading_pair=msg.trading_pair
+            ),
+            loop=self._ev_loop
+        )
 
 
 class MQTTMarketEventForwarder:
