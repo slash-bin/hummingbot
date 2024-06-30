@@ -1024,7 +1024,7 @@ class MQTTExternalEvents:
         )
         self._listeners: Dict[
             str,
-            List[Callable[ExternalEventMessage, str], None]
+            List[Callable[[ExternalEventMessage, str], None]]
         ] = {'*': []}
 
     def _event_uri_to_name(self, topic: str) -> str:
