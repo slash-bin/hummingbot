@@ -177,7 +177,7 @@ class MQTTCommands:
             msg_type=UserDirectedCancelCommandMessage,
             on_request=self._on_cmd_user_directed_cancel
         )
-        self._node.create_url(
+        self._node.create_rpc(
             rpc_name=self._user_directed_list_active_orders_uri,
             msg_type=UserDirectedListActiveOrdersCommandMessage,
             on_request=self._on_cmd_user_directed_list_active_orders
