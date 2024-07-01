@@ -162,6 +162,26 @@ class MQTTCommands:
             msg_type=CommandShortcutMessage,
             on_request=self._on_cmd_command_shortcut
         )
+        self._node.create_rpc(
+            rpc_name=self._exchange_info_uri,
+            msg_type=ExchangeInfoCommandMessage,
+            on_request=self._on_cmd_exchange_info
+        )
+        self._node.create_rpc(
+            rpc_name=self._user_directed_trade_uri,
+            msg_type=UserDirectedTradeCommandMessage,
+            on_request=self._on_cmd_user_directed_trade
+        )
+        self._node.create_rpc(
+            rpc_name=self._user_directed_cancel_uri,
+            msg_type=UserDirectedCancelCommandMessage,
+            on_request=self._on_cmd_user_directed_cancel
+        )
+        self._node.create_url(
+            rpc_name=self._user_directed_list_active_orders_uri,
+            msg_type=UserDirectedListActiveOrdersCommandMessage,
+            on_request=self._on_cmd_user_directed_list_active_orders
+        )
 
     def _on_cmd_start(self, msg: StartCommandMessage.Request):
         response = StartCommandMessage.Response()
