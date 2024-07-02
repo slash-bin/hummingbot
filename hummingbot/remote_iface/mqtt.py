@@ -405,7 +405,7 @@ class MQTTCommands:
             )
 
         strategy: UserDirectedTradingStrategy = self._hb_app.strategy
-        return call_sync(strategy.mqtt_exchange_info(), loop=self._ev_loop)
+        return call_sync(strategy.mqtt_exchange_info(msg.exchange), loop=self._ev_loop)
 
     def _on_cmd_user_directed_trade(
             self,
