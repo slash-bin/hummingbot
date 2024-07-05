@@ -464,7 +464,7 @@ class MQTTCommands:
 
         strategy: UserDirectedTradingStrategy = self._hb_app.strategy
         return call_sync(
-            strategy.mqtt_user_directed_list_active_orders(
+            strategy.mqtt_list_active_orders(
                 exchange=msg.exchange,
                 trading_pair=msg.trading_pair
             ),
