@@ -520,8 +520,10 @@ cdef class StrategyBase(TimeIterator):
             raise TypeError("price and amount must be Decimal objects.")
 
         cdef:
-            kwargs = {"expiration_ts": self._current_timestamp + expiration_seconds,
-                      "position_action": position_action}
+            dict kwargs = {
+                "expiration_ts": self._current_timestamp + expiration_seconds,
+                "position_action": position_action
+            }
             ConnectorBase market = market_trading_pair_tuple.market
 
         if market not in self._sb_markets:
@@ -565,8 +567,10 @@ cdef class StrategyBase(TimeIterator):
             raise TypeError("price and amount must be Decimal objects.")
 
         cdef:
-            kwargs = {"expiration_ts": self._current_timestamp + expiration_seconds,
-                      "position_action": position_action}
+            dict kwargs = {
+                "expiration_ts": self._current_timestamp + expiration_seconds,
+                "position_action": position_action
+            }
             ConnectorBase market = market_trading_pair_tuple.market
 
         if market not in self._sb_markets:

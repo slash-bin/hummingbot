@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from commlib.msg import PubSubMessage, RPCMessage
+from pydantic import BaseModel
 
 
 class MQTT_STATUS_CODE:
@@ -138,3 +139,83 @@ class BalancePaperCommandMessage(RPCMessage):
         status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
         msg: Optional[str] = ''
         data: Optional[str] = ''
+
+
+class ExchangeInfo(BaseModel):
+    name: str
+    trading_pairs: List[str]
+    balances: Dict[str, float]
+
+
+class ExchangeInfoCommandMessage(RPCMessage):
+    class Request(RPCMessage.Request):
+        exchange: Optional[str]
+
+    class Response(RPCMessage.Response):
+        status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
+        exchanges: List[ExchangeInfo] = []
+        msg: str = ''
+
+
+class UserDirectedTradeCommandMessage(RPCMessage):
+    class Request(RPCMessage.Request):
+        exchange: str
+        trading_pair: str
+        is_buy: bool
+        is_limit_order: bool
+        limit_price: Optional[str]
+        amount: str
+
+    class Response(RPCMessage.Response):
+        status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
+        order_id: str = ''
+        msg: str = ''
+
+
+class UserDirectedCancelCommandMessage(RPCMessage):
+    class Request(RPCMessage.Request):
+        order_id: str
+
+    class Response(RPCMessage.Response):
+        status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
+        exchange: str = ''
+        trading_pair: str = ''
+        order_id: str = ''
+        msg: str = ''
+
+
+class OpenOrderInfo(BaseModel):
+    exchange: str
+    trading_pair: str
+    order_id: str
+    is_buy: bool
+    is_limit_order: bool
+    limit_price: Optional[str]
+    amount_total: str
+    amount_remaining: str
+    order_state: str
+    msg: Optional[str]
+
+
+class UserDirectedListActiveOrdersCommandMessage(RPCMessage):
+    class Request(RPCMessage.Request):
+        exchange: Optional[str] = None
+        trading_pair: Optional[str] = None
+
+    class Response(RPCMessage.Response):
+        status: Optional[int] = MQTT_STATUS_CODE.SUCCESS
+        active_orders: List[OpenOrderInfo]
+        msg: str = ''
+
+
+class UserDirectedOrderUpdateMessage(PubSubMessage):
+    timestamp: Optional[int] = -1
+    exchange: str
+    trading_pair: str
+    is_buy: bool
+    is_limit_order: bool
+    limit_price: Optional[str]
+    amount_total: str
+    amount_remaining: str
+    order_state: str
+    msg: str = ''

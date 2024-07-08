@@ -36,6 +36,7 @@ from hummingbot.remote_iface.messages import (
     BalancePaperCommandMessage,
     CommandShortcutMessage,
     ConfigCommandMessage,
+    ExchangeInfoCommandMessage,
     ExternalEventMessage,
     HistoryCommandMessage,
     ImportCommandMessage,
@@ -46,6 +47,9 @@ from hummingbot.remote_iface.messages import (
     StatusCommandMessage,
     StatusUpdateMessage,
     StopCommandMessage,
+    UserDirectedCancelCommandMessage,
+    UserDirectedListActiveOrdersCommandMessage,
+    UserDirectedTradeCommandMessage,
 )
 
 mqtts_logger: HummingbotLogger = None
@@ -61,6 +65,10 @@ class CommandTopicSpecs:
     BALANCE_LIMIT: str = '/balance/limit'
     BALANCE_PAPER: str = '/balance/paper'
     COMMAND_SHORTCUT: str = '/command_shortcuts'
+    EXCHANGE_INFO: str = '/exchange_info'
+    USER_DIRECTED_TRADE: str = '/user_directed/trade'
+    USER_DIRECTED_CANCEL: str = '/user_directed/cancel'
+    USER_DIRECTED_LIST_ACTIVE_ORDERS: str = '/user_directed/list_active_orders'
 
 
 class TopicSpecs:
@@ -72,6 +80,7 @@ class TopicSpecs:
     STATUS_UPDATES: str = '/status_updates'
     HEARTBEATS: str = '/hb'
     EXTERNAL_EVENTS: str = '/external/event/*'
+    USER_DIRECTED_ORDER_UPDATES: str = '/user_directed/order_updates'
 
 
 class MQTTCommands:
@@ -100,6 +109,10 @@ class MQTTCommands:
         self._balance_limit_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.BALANCE_LIMIT}'
         self._balance_paper_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.BALANCE_PAPER}'
         self._shortcuts_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.COMMAND_SHORTCUT}'
+        self._exchange_info_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.EXCHANGE_INFO}'
+        self._user_directed_trade_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.USER_DIRECTED_TRADE}'
+        self._user_directed_cancel_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.USER_DIRECTED_CANCEL}'
+        self._user_directed_list_active_orders_uri = f'{topic_prefix}{TopicSpecs.COMMANDS.USER_DIRECTED_LIST_ACTIVE_ORDERS}'
 
         self._init_commands()
 
@@ -148,6 +161,26 @@ class MQTTCommands:
             rpc_name=self._shortcuts_uri,
             msg_type=CommandShortcutMessage,
             on_request=self._on_cmd_command_shortcut
+        )
+        self._node.create_rpc(
+            rpc_name=self._exchange_info_uri,
+            msg_type=ExchangeInfoCommandMessage,
+            on_request=self._on_cmd_exchange_info
+        )
+        self._node.create_rpc(
+            rpc_name=self._user_directed_trade_uri,
+            msg_type=UserDirectedTradeCommandMessage,
+            on_request=self._on_cmd_user_directed_trade
+        )
+        self._node.create_rpc(
+            rpc_name=self._user_directed_cancel_uri,
+            msg_type=UserDirectedCancelCommandMessage,
+            on_request=self._on_cmd_user_directed_cancel
+        )
+        self._node.create_rpc(
+            rpc_name=self._user_directed_list_active_orders_uri,
+            msg_type=UserDirectedListActiveOrdersCommandMessage,
+            on_request=self._on_cmd_user_directed_list_active_orders
         )
 
     def _on_cmd_start(self, msg: StartCommandMessage.Request):
@@ -358,6 +391,85 @@ class MQTTCommands:
             response.status = MQTT_STATUS_CODE.ERROR
             response.msg = str(e)
         return response
+
+    def _on_cmd_exchange_info(
+            self,
+            msg: ExchangeInfoCommandMessage.Request
+    ) -> ExchangeInfoCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return ExchangeInfoCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(strategy.mqtt_exchange_info(msg.exchange), loop=self._ev_loop)
+
+    def _on_cmd_user_directed_trade(
+            self,
+            msg: UserDirectedTradeCommandMessage.Request
+    ) -> UserDirectedTradeCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedTradeCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_user_directed_trade(
+                exchange=msg.exchange,
+                trading_pair=msg.trading_pair,
+                is_buy=msg.is_buy,
+                is_limit_order=msg.is_limit_order,
+                limit_price=Decimal(msg.limit_price) if msg.limit_price is not None else None,
+                amount=Decimal(msg.amount)
+            ),
+            loop=self._ev_loop
+        )
+
+    def _on_cmd_user_directed_cancel(
+            self,
+            msg: UserDirectedCancelCommandMessage.Request
+    ) -> UserDirectedCancelCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedCancelCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_user_directed_cancel(order_id=msg.order_id),
+            loop=self._ev_loop
+        )
+
+    def _on_cmd_user_directed_list_active_orders(
+            self,
+            msg: UserDirectedListActiveOrdersCommandMessage.Request
+    ) -> UserDirectedListActiveOrdersCommandMessage.Response:
+        from hummingbot.strategy.user_directed_trading.user_directed_trading import UserDirectedTradingStrategy
+
+        if not isinstance(self._hb_app.strategy, UserDirectedTradingStrategy):
+            return UserDirectedListActiveOrdersCommandMessage.Response(
+                status=MQTT_STATUS_CODE.ERROR,
+                msg="UserDirectedTradingStrategy is not running. This command requires a UserDirectedTradingStrategy."
+            )
+
+        strategy: UserDirectedTradingStrategy = self._hb_app.strategy
+        return call_sync(
+            strategy.mqtt_list_active_orders(
+                exchange=msg.exchange,
+                trading_pair=msg.trading_pair
+            ),
+            loop=self._ev_loop
+        )
 
 
 class MQTTMarketEventForwarder:
@@ -932,7 +1044,7 @@ class MQTTExternalEvents:
         )
         self._listeners: Dict[
             str,
-            List[Callable[ExternalEventMessage, str], None]
+            List[Callable[[ExternalEventMessage, str], None]]
         ] = {'*': []}
 
     def _event_uri_to_name(self, topic: str) -> str:
